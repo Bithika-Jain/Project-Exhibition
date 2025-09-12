@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Dashboard</title>
+    <link rel="stylesheet" href="student.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="dashboard-div">
+            <header>
+                <h1 class="welcome">Student Dashboard</h1>
+            </header>
+        </div>
+
+        <div class="logout-container">
+            <button id="logoutBtn" class="logout-btn">Logout</button>
+        </div>
+        
+        <div class="student-info">
+            <div class="info-card">
+                <h3>CGPA</h3>
+                <p class="value">8.5</p>
+            </div>
+        </div>
+        
+        <div class="project-tabs">
+            <a class="tab-btn" href="student_myapplication.html">My Applications</a>
+            <a class="tab-btn" href="student_selectedapplication.html">Selected Applications</a>
+        </div>
+        
+        <div class="browse-section">
+            <h2>Available Projects</h2>
+            <div id="projectsContainer" class="projects-container">
+                <!-- Projects will be dynamically loaded by main.js -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="main.js"></script>
+    <script>
+        // Protect page (redirect if not logged in)
+        const token = localStorage.getItem("access");
+        if (!token) {
+            window.location.href = "index.html";
+        }
+    </script>
+</body>
+</html>

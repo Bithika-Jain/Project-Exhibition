@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Faculty Dashboard</title>
+    <link rel="stylesheet" href="faculty.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="faculty-dashboard">
+            <header>
+                <h1>Faculty Dashboard</h1>
+                <p class="welcome">Welcome, Faculty</p>
+            </header>
+        </div>
+
+        <div class="logout-container">
+            <button id="logoutBtn" class="logout-btn">Logout</button>
+        </div>
+
+        <div class="stats-container">
+            <div class="stat-card">
+                <h3>My Projects</h3>
+                <p class="count">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Approved</h3>
+                <p class="count">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Pending Review</h3>
+                <p class="count">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Applications</h3>
+                <p class="count">0</p>
+            </div>
+        </div>
+        
+        <div class="actions">
+            <a class="anch-btn" href="faculty_newproposal.html">+ New Proposal</a>
+            <a class="anch-btn" href="faculty_reviewproject.html">Review Projects</a>
+        </div>
+        
+        <div id="facultyProjectsContainer" class="projects-container">
+            <!-- Faculty projects will be dynamically loaded here if needed -->
+        </div>
+
+        <div class="empty-state">
+            <h2>No Projects Yet</h2>
+            <p>You haven't submitted any project proposals yet. Click on "New Proposal" to get started.</p>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="main.js"></script>
+    <script>
+        // Protect page (redirect if not logged in or wrong role)
+        const user = JSON.parse(localStorage.getItem("currentUser"));
+        if (!user || user.role !== "faculty") {
+            window.location.href = "index.html";
+        }
+    </script>
+</body>
+</html>
