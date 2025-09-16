@@ -254,11 +254,11 @@
                     
                     <div class="form-group">
                         <label for="projDifficulty">Difficulty Level</label>
-                        <select id="projDifficulty" required>
+                       <select id="projDifficulty" required>
                             <option value="">Select difficulty level</option>
-                            <option value="beginner">Beginner</option>
-                            <option value="intermediate">Intermediate</option>
-                            <option value="advanced">Advanced</option>
+                            <option value="easy">Beginner</option>
+                            <option value="medium">Intermediate</option>
+                            <option value="hard">Advanced</option>
                         </select>
                     </div>
                     
@@ -277,21 +277,44 @@
     </div>
 
     <script>
-        document.getElementById('proposalForm').addEventListener('submit', function(event) {
+        document.getElementById('proposalForm').addEventListener('submit', async function(event) {
             event.preventDefault();
+        
+            // 1. Gather all the data from the form fields
+            const proposalData = {
+                title: document.getElementById('projTitle').value,
+                abstract: document.getElementById('projAbstract').value,
+                timeline: document.getElementById('projTimeline').value,
+                difficulty: document.getElementById('projDifficulty').value,
+                seats: parseInt(document.getElementById('projSeats').value, 10)
+            };
+
+            const token = localStorage.getItem("access"); // Get your login token
+
+            try {
+                // 2. Send the data to your backend API
+                const response = await fetch("http://127.0.0.1:8000/api/projects/", {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}` // Use the token to prove you're logged in
+                    },
+                    body: JSON.stringify(proposalData)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(JSON.stringify(errorData));
+                }
             
-            // Basic validation
-            const title = document.getElementById('projTitle').value;
-            const abstract = document.getElementById('projAbstract').value;
-            
-            if (title.trim() === '' || abstract.trim() === '') {
-                alert('Please fill in all required fields');
-                return;
+                // 3. If successful, show an alert and go back to the dashboard
+                alert('Project proposal submitted successfully!');
+                window.location.href = 'faculty.html';
+
+            } catch (error) {
+                console.error('Submission failed:', error);
+                alert('Failed to submit proposal: ' + error.message);
             }
-            
-            // If validation passes, show success message
-            alert('Project proposal submitted successfully!');
-            this.reset();
         });
 
         function goBack() {

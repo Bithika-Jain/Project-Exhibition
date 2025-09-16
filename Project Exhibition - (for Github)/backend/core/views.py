@@ -88,7 +88,10 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             student = Student.objects.get(user=self.request.user)
         except Student.DoesNotExist:
             raise ValidationError("Only students can apply to projects.")
-
+        
+        if Application.objects.filter(student=student).count() >= 3:
+            raise ValidationError("You cannot apply to more than 3 projects.")
+        
         project = serializer.validated_data.get('project')
         if Application.objects.filter(student=student, project=project).exists():
             raise ValidationError("You have already applied to this project.")
