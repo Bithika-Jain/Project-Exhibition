@@ -96,7 +96,14 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         if Application.objects.filter(student=student, project=project).exists():
             raise ValidationError("You have already applied to this project.")
 
-        serializer.save(student=student)
+        application = serializer.save(student=student)
+        # Get the project from the application that was just created
+        project = application.project
+
+        # Decrease the seat count if seats are available and save the project
+        if project.seats_available > 0:
+            project.seats_available -= 1
+            project.save()    
 
     @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def my(self, request):
