@@ -1,51 +1,94 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
     <title>Student Dashboard</title>
-    <link rel="stylesheet" href="student.css">
+    <link rel="stylesheet" href="student.css" />
 </head>
 <body>
-    <div class="dashboard-container">
-        <div class="dashboard-div">
-            <header>
-                <h1 class="welcome">Student Dashboard</h1>
-            </header>
-        </div>
-
-        <div class="logout-container">
-            <button id="logoutBtn" class="logout-btn">Logout</button>
-        </div>
-        
-        <div class="student-info">
-            <div class="info-card">
-                <h3>CGPA</h3>
-                <p class="value">8.5</p>
-            </div>
-        </div>
-        
-        <div class="project-tabs">
-            <a class="tab-btn" href="student_myapplication.html">My Applications</a>
-            <a class="tab-btn" href="student_selectedapplication.html">Selected Applications</a>
-        </div>
-        
-        <div class="browse-section">
-            <h2>Available Projects</h2>
-            <div id="projectsContainer" class="projects-container">
-                <!-- Projects will be dynamically loaded by main.js -->
-            </div>
-        </div>
+<div class="dashboard-container">
+    <header>
+        <h1>Student Dashboard</h1>
+        <p class="welcome">Welcome, Student</p>
+    </header>
+    <div class="header-actions">
+        <button id="logoutBtn">Logout</button>
     </div>
+    
+    <section id="projectsContainer">
+        <h2>Available Projects</h2>
+        <div id="projectsList">
+            <div class="loading">Loading projects...</div>
+        </div>
+    </section>
+    
+    <section class="my-applications">
+        <h2>My Applications</h2>
+        <div id="myApplicationsList">
+            <div class="loading">Loading applications...</div>
+        </div>
+    </section>
+</div>
 
-    <!-- Scripts -->
-    <script src="main.js"></script>
-    <script>
-        // Protect page (redirect if not logged in)
-        const token = localStorage.getItem("access");
-        if (!token) {
-            window.location.href = "index.html";
+<script src="main.js"></script>
+<script>
+    // Protect page (redirect if not logged in or wrong role)
+    const user = JSON.parse(localStorage.getItem("currentUser"));
+    if (!user || user.role !== "student") {
+        window.location.href = "index.html";
+    }
+
+    // Load my applications
+    async function loadMyApplications() {
+        const myAppsList = document.getElementById("myApplicationsList");
+        if (!myAppsList) return;
+
+        try {
+            const token = localStorage.getItem("access");
+            const response = await fetch("http://127.0.0.1:8000/api/applications/my/", {
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                }
+            });
+
+            if (response.ok) {
+                const applications = await response.json();
+                
+                if (applications.length === 0) {
+                    myAppsList.innerHTML = `<p class="empty-state">You haven't applied to any projects yet.</p>`;
+                    return;
+                }
+
+                myAppsList.innerHTML = "";
+                applications.forEach(app => {
+                    const appDiv = document.createElement("div");
+                    appDiv.classList.add("application-card");
+                    
+                    const statusColor = {
+                        'pending': '#f39c12',
+                        'shortlisted': '#3498db',
+                        'selected': '#2ecc71',
+                        'rejected': '#e74c3c'
+                    };
+                    
+                    appDiv.innerHTML = `
+                        <h4>Project Application</h4>
+                        <p><strong>Status:</strong> <span style="color: ${statusColor[app.status] || '#333'}">${app.status}</span></p>
+                        <p><strong>Applied:</strong> ${new Date(app.applied_at).toLocaleDateString()}</p>
+                    `;
+                    myAppsList.appendChild(appDiv);
+                });
+            } else {
+                myAppsList.innerHTML = `<p class="error">Could not load applications.</p>`;
+            }
+        } catch (error) {
+            console.error("Error loading applications:", error);
+            myAppsList.innerHTML = `<p class="error">Error loading applications.</p>`;
         }
-    </script>
+    }
+
+    document.addEventListener("DOMContentLoaded", loadMyApplications);
+</script>
 </body>
 </html>

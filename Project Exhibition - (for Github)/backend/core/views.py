@@ -9,68 +9,175 @@ from django.contrib.auth.models import User
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from django.contrib.auth.hashers import make_password
+from django.db.models import Count
+
+# Custom permission: only allow access based on user role
+class IsFacultyUser(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        try:
+            Faculty.objects.get(user=request.user)
+            return True
+        except Faculty.DoesNotExist:
+            return False
+
+class IsStudentUser(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        try:
+            Student.objects.get(user=request.user)
+            return True
+        except Student.DoesNotExist:
+            return False
 
 # Faculty API
 class FacultyViewSet(viewsets.ModelViewSet):
     queryset = Faculty.objects.all()
     serializer_class = FacultySerializer
-
+    permission_classes = [IsFacultyUser]
 
 # Student API
 class StudentViewSet(viewsets.ModelViewSet):
     queryset = Student.objects.all()
     serializer_class = StudentSerializer
+    permission_classes = [IsStudentUser]
 
-
-# Custom permission: only project owner (student) can edit/delete
+# Custom permission: only project owner (faculty) can edit/delete
 class IsOwnerOrReadOnly(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         if request.method in permissions.SAFE_METHODS:
             return True
+        if hasattr(obj, 'faculty'):
+            return obj.faculty.user == request.user
         return obj.student.user == request.user
 
-#Project API
+# Project API
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-    def perform_create(self, serializer):
-        serializer.save(faculty=self.request.user.faculty_profile)
+    def get_queryset(self):
+        queryset = Project.objects.annotate(applications_count=Count('applications'))
+        # Students can only see approved projects
+        if hasattr(self.request.user, 'student'):
+            return queryset.filter(is_approved=True)
+        return queryset
 
-    # ✅ Custom action for Approve
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def perform_create(self, serializer):
+        try:
+            faculty = Faculty.objects.get(user=self.request.user)
+        except Faculty.DoesNotExist:
+            raise ValidationError("Only faculty members can create projects.")
+        
+        seats = serializer.validated_data.get('seats', 1)
+        # All new projects start as pending and not approved
+        serializer.save(
+            faculty=faculty, 
+            seats_available=seats,
+            status='pending',
+            is_approved=False
+        )
+
+    @action(detail=False, methods=['get'], permission_classes=[IsFacultyUser])
+    def my(self, request):
+        """Return projects created by the currently logged-in faculty."""
+        try:
+            faculty = Faculty.objects.get(user=request.user)
+            faculty_projects = Project.objects.filter(faculty=faculty).annotate(
+                applications_count=Count('applications')
+            )
+            serializer = self.get_serializer(faculty_projects, many=True)
+            return Response(serializer.data)
+        except Faculty.DoesNotExist:
+            return Response({"error": "Faculty profile not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsFacultyUser])
+    def pending_review(self, request):
+        """Return projects pending review for committee members."""
+        try:
+            faculty = Faculty.objects.get(user=request.user)
+            
+            # Check if user is a committee member
+            if not hasattr(request.user, 'committee_profile') or not request.user.committee_profile.approved_by_admin:
+                return Response({"error": "Only approved committee members can review projects."}, 
+                              status=status.HTTP_403_FORBIDDEN)
+            
+            # Get projects from same department that are pending (exclude own projects)
+            pending_projects = Project.objects.filter(
+                faculty__department=faculty.department,
+                status='pending',
+                is_approved=False
+            ).exclude(faculty=faculty)  # Exclude own projects
+            
+            # Add faculty name to each project for display
+            projects_data = []
+            for project in pending_projects:
+                project_data = self.get_serializer(project).data
+                project_data['faculty_name'] = project.faculty.user.get_full_name() or project.faculty.user.username
+                projects_data.append(project_data)
+            
+            return Response(projects_data)
+        except Faculty.DoesNotExist:
+            return Response({"error": "Faculty profile not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsFacultyUser])
     def approve(self, request, pk=None):
         project = self.get_object()
-        # Only committee members can approve
-        if not hasattr(request.user, "committee_profile") or not request.user.committee_profile.approved_by_admin:
-            return Response({"error": "Only approved committee members can approve projects."},
-                            status=status.HTTP_403_FORBIDDEN)
+        try:
+            faculty = Faculty.objects.get(user=request.user)
+            # Check if user is committee member
+            if not hasattr(request.user, "committee_profile") or not request.user.committee_profile.approved_by_admin:
+                return Response({"error": "Only approved committee members can approve projects."},
+                                status=status.HTTP_403_FORBIDDEN)
+            
+            # Check if it's same department
+            if project.faculty.department != faculty.department:
+                return Response({"error": "You can only review projects from your department."},
+                                status=status.HTTP_403_FORBIDDEN)
 
-        project.status = "approved"
-        project.is_approved = True
-        project.is_discarded = False
-        project.save()
-        return Response({"message": f"Project '{project.title}' approved successfully!",
-                         "status": project.status})
+            # Check if trying to approve own project
+            if project.faculty == faculty:
+                return Response({"error": "You cannot approve your own project."},
+                                status=status.HTTP_403_FORBIDDEN)
 
-    # ✅ Custom action for Reject
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+            project.status = "approved"
+            project.is_approved = True
+            project.is_discarded = False
+            project.save()
+            return Response({"message": f"Project '{project.title}' approved successfully!"})
+        except Faculty.DoesNotExist:
+            return Response({"error": "Faculty profile not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsFacultyUser])
     def reject(self, request, pk=None):
         project = self.get_object()
-        # Only committee members can reject
-        if not hasattr(request.user, "committee_profile") or not request.user.committee_profile.approved_by_admin:
-            return Response({"error": "Only approved committee members can reject projects."},
-                            status=status.HTTP_403_FORBIDDEN)
+        try:
+            faculty = Faculty.objects.get(user=request.user)
+            # Check if user is committee member
+            if not hasattr(request.user, "committee_profile") or not request.user.committee_profile.approved_by_admin:
+                return Response({"error": "Only approved committee members can reject projects."},
+                                status=status.HTTP_403_FORBIDDEN)
+            
+            # Check if it's same department
+            if project.faculty.department != faculty.department:
+                return Response({"error": "You can only review projects from your department."},
+                                status=status.HTTP_403_FORBIDDEN)
 
-        project.status = "rejected"
-        project.is_approved = False
-        project.is_discarded = True
-        project.save()
-        return Response({"message": f"Project '{project.title}' rejected successfully!",
-                         "status": project.status})
+            # Check if trying to reject own project
+            if project.faculty == faculty:
+                return Response({"error": "You cannot reject your own project."},
+                                status=status.HTTP_403_FORBIDDEN)
 
-
+            project.status = "rejected"
+            project.is_approved = False
+            project.is_discarded = True
+            project.save()
+            return Response({"message": f"Project '{project.title}' rejected successfully!"})
+        except Faculty.DoesNotExist:
+            return Response({"error": "Faculty profile not found"}, status=status.HTTP_404_NOT_FOUND)
 
 # Application API
 class ApplicationViewSet(viewsets.ModelViewSet):
@@ -79,77 +186,104 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def perform_create(self, serializer):
-        """
-        When a student creates an application, set the student automatically from request.user.
-        Frontend should POST { "project": <project_id> } only.
-        Prevent duplicate applications by the same student to the same project.
-        """
+        """Students can apply to projects."""
         try:
             student = Student.objects.get(user=self.request.user)
         except Student.DoesNotExist:
             raise ValidationError("Only students can apply to projects.")
         
+        # Check application limit
         if Application.objects.filter(student=student).count() >= 3:
             raise ValidationError("You cannot apply to more than 3 projects.")
         
         project = serializer.validated_data.get('project')
+        
+        # Check for duplicate applications
         if Application.objects.filter(student=student, project=project).exists():
             raise ValidationError("You have already applied to this project.")
 
-        application = serializer.save(student=student)
-        # Get the project from the application that was just created
-        project = application.project
+        # Check if project has available seats
+        if project.seats_available <= 0:
+            raise ValidationError("No seats available for this project.")
 
-        # Decrease the seat count if seats are available and save the project
+        # Check if project is approved
+        if not project.is_approved:
+            raise ValidationError("This project is not yet approved for applications.")
+
+        # Create the application
+        application = serializer.save(student=student)
+        
+        # Decrease available seats
         if project.seats_available > 0:
             project.seats_available -= 1
-            project.save()    
+            project.save()
 
-    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=False, methods=["get"], permission_classes=[IsStudentUser])
     def my(self, request):
-        """
-        Return applications submitted by the logged-in student.
-        GET /api/applications/my/
-        """
-        apps = Application.objects.filter(student__user=request.user)
-        serializer = self.get_serializer(apps, many=True)
-        return Response(serializer.data)
+        """Return applications submitted by the logged-in student."""
+        try:
+            student = Student.objects.get(user=request.user)
+            apps = Application.objects.filter(student=student)
+            serializer = self.get_serializer(apps, many=True)
+            return Response(serializer.data)
+        except Student.DoesNotExist:
+            return Response({"error": "Student profile not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=False, methods=["get"], permission_classes=[IsFacultyUser])
     def faculty_applications(self, request):
-        """
-        Return all applications for projects created by the logged-in faculty.
-        GET /api/applications/faculty_applications/
-        """
-        apps = Application.objects.filter(project__faculty__user=request.user)
-        serializer = self.get_serializer(apps, many=True)
-        return Response(serializer.data)
+        """Return all applications for projects created by the logged-in faculty."""
+        try:
+            faculty = Faculty.objects.get(user=request.user)
+            apps = Application.objects.filter(project__faculty=faculty)
+            serializer = self.get_serializer(apps, many=True)
+            return Response(serializer.data)
+        except Faculty.DoesNotExist:
+            return Response({"error": "Faculty profile not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
-    def accept(self, request, pk=None):
-        """
-        Faculty accepts an application -> sets status = 'accepted'
-        POST /api/applications/{id}/accept/
-        """
+    @action(detail=True, methods=["post"], permission_classes=[IsFacultyUser])
+    def select(self, request, pk=None):
+        """Faculty selects a student for their project."""
         app = self.get_object()
-        if app.project.faculty.user != request.user:
-            return Response({"detail": "Not allowed"}, status=status.HTTP_403_FORBIDDEN)
-        app.status = "accepted"
-        app.save()
-        return Response(self.get_serializer(app).data)
+        try:
+            faculty = Faculty.objects.get(user=request.user)
+            if app.project.faculty != faculty:
+                return Response({"detail": "Not allowed"}, status=status.HTTP_403_FORBIDDEN)
+            
+            # Check if student is already selected for another project
+            if Application.objects.filter(student=app.student, status='selected').exists():
+                return Response({"error": "Student is already selected for another project"}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+            
+            app.status = "selected"
+            app.save()
+            
+            # Reject all other applications for this student
+            Application.objects.filter(student=app.student).exclude(id=app.id).update(status='rejected')
+            
+            return Response(self.get_serializer(app).data)
+        except Faculty.DoesNotExist:
+            return Response({"error": "Faculty profile not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=["post"], permission_classes=[IsFacultyUser])
     def reject(self, request, pk=None):
-        """
-        Faculty rejects an application -> sets status = 'rejected'
-        POST /api/applications/{id}/reject/
-        """
+        """Faculty rejects an application."""
         app = self.get_object()
-        if app.project.faculty.user != request.user:
-            return Response({"detail": "Not allowed"}, status=status.HTTP_403_FORBIDDEN)
-        app.status = "rejected"
-        app.save()
-        return Response(self.get_serializer(app).data)
+        try:
+            faculty = Faculty.objects.get(user=request.user)
+            if app.project.faculty != faculty:
+                return Response({"detail": "Not allowed"}, status=status.HTTP_403_FORBIDDEN)
+            
+            app.status = "rejected"
+            app.save()
+            
+            # Increase seats_available when rejecting
+            project = app.project
+            project.seats_available += 1
+            project.save()
+            
+            return Response(self.get_serializer(app).data)
+        except Faculty.DoesNotExist:
+            return Response({"error": "Faculty profile not found"}, status=status.HTTP_404_NOT_FOUND)
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
@@ -163,22 +297,19 @@ def signup(request):
         return Response({"error": "username, password and role are required"},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    # ✅ check if username already exists
     if User.objects.filter(username=username).exists():
         return Response({"error": "Username already taken"},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    # ✅ create user with hashed password
     user = User.objects.create(
         username=username,
         password=make_password(password)
     )
 
-    # ✅ attach role-specific profile
     if role == "student":
         Student.objects.create(
             user=user,
-            roll_number=data.get("roll_number", "TEMP123"),
+            roll_number=data.get("roll_number", f"TEMP_{user.id}"),
             course=data.get("course", "Unknown")
         )
     elif role == "faculty":
@@ -194,9 +325,9 @@ def signup(request):
 class CommitteeViewSet(viewsets.ModelViewSet):
     queryset = Committee.objects.all()
     serializer_class = CommitteeSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsFacultyUser]
 
-    @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=False, methods=['post'], permission_classes=[IsFacultyUser])
     def apply(self, request):
         """Custom endpoint for faculty to apply as committee member"""
         serializer = self.get_serializer(data=request.data)

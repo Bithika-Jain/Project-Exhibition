@@ -8,13 +8,12 @@
     <style>
         body{
             background-color:rgb(248, 249, 250);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-
         }
         .form-container {
             background: white;
@@ -37,10 +36,7 @@
         }
         .main-content {
             flex: 1;
-            padding-left: 70px;
-            padding-right: 70px;
-            padding-bottom: 70px;
-            padding-top: 35px;
+            padding: 35px 70px 70px 70px;
         }
         .empty-state{
            text-align: center; 
@@ -74,27 +70,94 @@
         .actions{
             margin-bottom: 30px;
         }
+
+        .project-review-card {
+            border: 1px solid #ddd;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .project-review-card h4 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .project-review-card p {
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+
+        .review-buttons {
+            margin-top: 15px;
+        }
+
+        .approve-btn {
+            background: #2ecc71;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin-right: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .reject-btn {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .approve-btn:hover {
+            background: #27ae60;
+        }
+
+        .reject-btn:hover {
+            background: #c0392b;
+        }
     </style>
 </head>
 <body>
     <div class="main-content">
-    <div class="header"><h2>Projects Pending Review</h2></div>
-    <div class="actions">
-                <button class="btn btn-primary" onclick="goBack()">
-                    <i class="fas fa-arrow-left"></i>
-                    Back to Dashboard
-                </button>    
-    </div>
-    <section class="form-container" id="contentReviewProjects">
-    <ul id="reviewProjectsList" class="project-list"></ul>
-    <div class="empty-state" id="noReviewProjects">No projects to review.</div>
-    </section>
+        <div class="header">
+            <h2>Projects Pending Review</h2>
+        </div>
+        <div class="actions">
+            <button class="btn btn-primary" onclick="goBack()">
+                <i class="fas fa-arrow-left"></i>
+                Back to Dashboard
+            </button>    
+        </div>
+        <section class="form-container" id="contentReviewProjects">
+            <div id="reviewProjectsList"></div>
+            <div class="empty-state" id="noReviewProjects" style="display: none;">
+                Only approved committee members can review projects from their department.
+            </div>
+        </section>
     </div>
 
+    <script src="main.js"></script>
     <script>
+        // Protect page (redirect if not logged in or wrong role)
+        const user = JSON.parse(localStorage.getItem("currentUser"));
+        if (!user || user.role !== "faculty") {
+            window.location.href = "index.html";
+        }
+
         function goBack() {
             window.history.back();
         }
+
+        // Global functions for approve/reject (called from main.js)
+        window.approveProject = approveProject;
+        window.rejectProject = rejectProject;
     </script>
 </body>
 </html>
