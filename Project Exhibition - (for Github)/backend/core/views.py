@@ -98,49 +98,58 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def pending_review(self, request):
         """Return projects pending review for committee members."""
         try:
-            faculty = Faculty.objects.get(user=request.user)
-            
             # Check if user is a committee member
-            if not hasattr(request.user, 'committee_profile') or not request.user.committee_profile.approved_by_admin:
+            if not hasattr(request.user, 'committee_profile'):
+                return Response({"error": "Only committee members can review projects."}, 
+                              status=status.HTTP_403_FORBIDDEN)
+            
+            committee_profile = request.user.committee_profile
+            if not committee_profile.approved_by_admin:
                 return Response({"error": "Only approved committee members can review projects."}, 
                               status=status.HTTP_403_FORBIDDEN)
+            
+            # Get faculty profile to determine department
+            try:
+                faculty = Faculty.objects.get(user=request.user)
+            except Faculty.DoesNotExist:
+                return Response({"error": "Committee member must also have faculty profile"}, 
+                              status=status.HTTP_400_BAD_REQUEST)
             
             # Get projects from same department that are pending (exclude own projects)
             pending_projects = Project.objects.filter(
                 faculty__department=faculty.department,
                 status='pending',
                 is_approved=False
-            ).exclude(faculty=faculty)  # Exclude own projects
+            ).exclude(faculty=faculty).select_related('faculty__user')
             
-            # Add faculty name to each project for display
+            # Add faculty name to the serialized data
             projects_data = []
             for project in pending_projects:
                 project_data = self.get_serializer(project).data
-                project_data['faculty_name'] = project.faculty.user.get_full_name() or project.faculty.user.username
+                project_data['faculty_name'] = f"{project.faculty.user.first_name} {project.faculty.user.last_name}".strip() or project.faculty.user.username
                 projects_data.append(project_data)
             
             return Response(projects_data)
-        except Faculty.DoesNotExist:
-            return Response({"error": "Faculty profile not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        except Exception as e:
+            return Response({"error": f"Error fetching pending projects: {str(e)}"}, 
+                          status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=["post"], permission_classes=[IsFacultyUser])
     def approve(self, request, pk=None):
         project = self.get_object()
         try:
-            faculty = Faculty.objects.get(user=request.user)
             # Check if user is committee member
             if not hasattr(request.user, "committee_profile") or not request.user.committee_profile.approved_by_admin:
                 return Response({"error": "Only approved committee members can approve projects."},
                                 status=status.HTTP_403_FORBIDDEN)
             
+            # Get faculty profile to check department
+            faculty = Faculty.objects.get(user=request.user)
+            
             # Check if it's same department
             if project.faculty.department != faculty.department:
                 return Response({"error": "You can only review projects from your department."},
-                                status=status.HTTP_403_FORBIDDEN)
-
-            # Check if trying to approve own project
-            if project.faculty == faculty:
-                return Response({"error": "You cannot approve your own project."},
                                 status=status.HTTP_403_FORBIDDEN)
 
             project.status = "approved"
@@ -155,20 +164,17 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def reject(self, request, pk=None):
         project = self.get_object()
         try:
-            faculty = Faculty.objects.get(user=request.user)
             # Check if user is committee member
             if not hasattr(request.user, "committee_profile") or not request.user.committee_profile.approved_by_admin:
                 return Response({"error": "Only approved committee members can reject projects."},
                                 status=status.HTTP_403_FORBIDDEN)
             
+            # Get faculty profile to check department
+            faculty = Faculty.objects.get(user=request.user)
+            
             # Check if it's same department
             if project.faculty.department != faculty.department:
                 return Response({"error": "You can only review projects from your department."},
-                                status=status.HTTP_403_FORBIDDEN)
-
-            # Check if trying to reject own project
-            if project.faculty == faculty:
-                return Response({"error": "You cannot reject your own project."},
                                 status=status.HTTP_403_FORBIDDEN)
 
             project.status = "rejected"
